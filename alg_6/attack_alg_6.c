@@ -81,31 +81,41 @@ void sign_digest_esk(uint8_t *pt_signature, const uint8_t *digest,
 	uint8_t c_beta[l_SNOVA * Q * v_SNOVA] = { 0 }; // Counter for occurrences of elements in V columns
 	for (int i = 0; i < 100; i++) {
 		uint8_t V[(v_SNOVA * lsq_SNOVA + 1) >> 1] = { 0 };
-		int succes = sign_with_fault_injection(pt_signature, digest,
+		int success = sign_with_fault_injection(pt_signature, digest,
 				bytes_digest, array_salt, sk_upk.Aalpha, sk_upk.Balpha,
 				sk_upk.Qalpha1, sk_upk.Qalpha2, sk_upk.T12, sk_upk.F11,
 				sk_upk.F12, sk_upk.F21, sk_upk.pt_public_key_seed,
 				sk_upk.pt_private_key_seed, V);
 
-		compute_stats(V, c_beta);
+		if (!success) {
+			compute_stats(V, c_beta);
+			printf("Gamma_epsilon_1_sup = %d\n", Gamma_epsilon_1_sup);
+			printf("Gamma_epsilon_1_inf = %d\n", Gamma_epsilon_1_inf);
+			printf("Gamma_epsilon_2_sup = %d\n", Gamma_epsilon_2_sup);
+			printf("Gamma_epsilon_2_inf = %d\n", Gamma_epsilon_2_inf);
 
-		for (int beta = 0; beta < l_SNOVA; beta++) {
-			for (uint8_t x = 0; x < Q; x++) {
-				if (Gamma_epsilon_1_sup >= c_beta[beta * Q + x]
-						&& c_beta[beta * Q + x] >= Gamma_epsilon_1_inf) {
-					successes_r1++;
-					successes_r2++;
-					goto next_run;
-				}
-				if (Gamma_epsilon_2_sup >= c_beta[beta * Q + x]
-						&& c_beta[beta * Q + x] >= Gamma_epsilon_2_inf) {
-					successes_r2++;
-					goto next_run;
+			for (int beta = 0; beta < l_SNOVA; beta++) {
+				for (uint8_t x = 0; x < Q; x++) {
+					// Check for success condition r=1
+					if (c_beta[beta * Q + x] <= Gamma_epsilon_1_sup &&
+							c_beta[beta * Q + x] >= Gamma_epsilon_1_inf) {
+						successes_r1++;
+						successes_r2++;  // Count for both r=1 and r=2
+						goto next_run;
+						// Exit current loop iteration if success condition met
+					}
+					// Check for success condition r=2
+					if (c_beta[beta * Q + x] <= Gamma_epsilon_2_sup
+							&& c_beta[beta * Q + x] >= Gamma_epsilon_2_inf) {
+						successes_r2++;  // Count for r=2 only
+						goto next_run;
+						// Exit current loop iteration if success condition met
+					}
 				}
 			}
-		}
-		next_run: continue;
+			next_run: continue;
 
+		}
 	}
 
 	// Clear Secret!
@@ -135,7 +145,7 @@ int main() {
 	snova_init();
 
 	printf("Starting matrix P\n");
-	initialize_P_matrix(0, 4);
+	initialize_P_matrix(0, 2);
 	printf("matrix P:\n");
 	print_P_matrix(P);
 	printf("calculate_Gamma_thresholds\n");
@@ -173,7 +183,9 @@ int main() {
 	/*printf("generate_keys_pack\n");
 	 generate_keys_esk(pk, sk, pt_public_key_seed, pt_private_key_seed);*/
 
-	read_from_file("/home/gustavo/eclipse_code_attacks/snova_attack/src/keys.txt", pk, bytes_pk, sk, bytes_sk, seed, seed_length);
+	read_from_file(
+			"/home/gustavo/eclipse_code_attacks/snova_attack/src/keys.txt", pk,
+			bytes_pk, sk, bytes_sk, seed, seed_length);
 
 	pt_public_key_seed = seed;
 	pt_private_key_seed = seed + seed_length_public;

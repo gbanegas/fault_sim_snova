@@ -1009,9 +1009,14 @@ bool sign_with_fault_injection(uint8_t *pt_signature, const uint8_t *digest,
 
 	inject_faults(V, vinegar_in_byte); // Generate values for V with fault injection
 	// Proceed with signature generation (assumes a function `generate_signature`)
+
+	/*for(int i = 0; i < (v_SNOVA * lsq_SNOVA + 1);i++){
+		printf("0x%2x,", V[i]);
+	}
+	printf("\n");*/
 	signature_success = sign_digest_core_ref_attack(pt_signature, digest,
 			bytes_digest, array_salt, Aalpha, Balpha, Qalpha1, Qalpha2, T12,
-			F11, F12, F21, vinegar_in_byte, pt_public_key_seed,
+			F11, F12, F21, V, pt_public_key_seed,
 			pt_private_key_seed);
 	if (!signature_success) {
 		step_2_failures++;
