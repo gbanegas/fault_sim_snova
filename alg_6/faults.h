@@ -45,7 +45,7 @@ void print_P_matrix(float m_p[v_SNOVA][l_SNOVA][l_SNOVA]) {
 uint8_t random_F_q_excluding(uint8_t fixed_value) {
 	uint8_t random_value;
 	do {
-		random_value = rand() % 4;
+		random_value = rand() % 16;
 	} while (random_value == fixed_value);
 	return random_value;
 }
@@ -60,24 +60,42 @@ float random_between_ep_and_1() {
 }
 
 // Fault injection with Bernoulli distribution
-void inject_faults(uint8_t *V, uint8_t *vinegar_byte) {
-	uint8_t fixed_value = random_F_q_excluding(0); // Example fixed fault value in F_q
+void inject_faults(uint8_t *V, uint8_t *vinegar_in_byte) {
+    uint8_t fixed_value = random_F_q_excluding(0); // Fixed fault value in F_q
+    int counter = 0;
 
-	for (int i = 0; i < v_SNOVA; i++) {
-		for (int j = 0; j < l_SNOVA; j++) {
-			for (int k = 0; k < l_SNOVA; k++) {
-				float res = ((float) rand() / RAND_MAX);
-				if (res <= P[i][j][k]) {
-					V[(i * l_SNOVA * l_SNOVA) + j * l_SNOVA + k] = fixed_value;
-				} else {
-					V[(i * l_SNOVA * l_SNOVA) + j * l_SNOVA + k] =
-							random_F_q_excluding(fixed_value);
-				}
-			}
-		}
-	}
+    for (int i = 0; i < v_SNOVA; i++) {
+        for (int j = 0; j < l_SNOVA; j++) {
+            for (int k = 0; k < l_SNOVA; k++) {
+                float res = ((float) rand() / RAND_MAX);
+                uint8_t upper_element, lower_element;
+
+                // Determine fault or random value for each nibble
+                if (res <= P[i][j][k]) {
+                    // Fault condition: use fixed fault value for both nibbles
+                    upper_element = fixed_value;
+                    lower_element = fixed_value;
+                } else {
+                    // No fault: use random values for both nibbles
+                    upper_element = random_F_q_excluding(0);
+                    lower_element = random_F_q_excluding(0);
+                }
+
+                // Set the byte in V using the upper and lower nibbles
+                int idx = (i * l_SNOVA * l_SNOVA + j * l_SNOVA + k) / 2;
+                if (counter & 1) {
+                    // Place in the lower nibble if odd counter
+                    V[idx] = (V[idx] & 0xF0) | lower_element;
+                } else {
+                    // Place in the upper nibble if even counter
+                    V[idx] = (V[idx] & 0x0F) | (upper_element << 4);
+                }
+
+                counter++;
+            }
+        }
+    }
 }
-
 /*void compute_stats(uint8_t *V, uint8_t *c_beta) {
  // Loop through each column (beta) of V
  for (int beta = 0; beta < l_SNOVA; beta++) {
@@ -96,20 +114,34 @@ void inject_faults(uint8_t *V, uint8_t *vinegar_byte) {
  }*/
 
 void compute_stats(uint8_t *V, uint8_t *c_beta) {
-	for (int beta = 0; beta < l_SNOVA; beta++) {
-		for (uint8_t x = 0; x < Q; x++) {
-			c_beta[beta * Q + x] = 0;
-			for (int i = 0; i < v_SNOVA; i++) {
-				for (int j = 0; j < l_SNOVA; j++) {
-					if (V[i * l_SNOVA * l_SNOVA + j * l_SNOVA + beta] == x) { // checks Vi,jb==x
-						c_beta[beta * Q + x]++;
-					}
-				}
-			}
-		}
-	}
-}
+    // Loop through each column (beta) of V
+    for (int beta = 0; beta < l_SNOVA; beta++) {
+        // Loop through each possible value in F_q (Q = 16)
+        for (uint8_t x = 0; x < Q; x++) {
+            c_beta[beta * Q + x] = 0; // Initialize count for each value x in column beta
 
+            // Loop through each row of V
+            for (int i = 0; i < v_SNOVA; i++) {
+                for (int j = 0; j < l_SNOVA; j++) {
+                    // Calculate the index in the flat array V
+                    int idx = i * l_SNOVA * l_SNOVA + j * l_SNOVA + beta;
+
+                    // Extract upper and lower 4-bit elements from each 8-bit value
+                    uint8_t upper_element = V[idx] >> 4;
+                    uint8_t lower_element = V[idx] & 0x0F;
+
+                    // Increment counters for occurrences of x in the upper and lower nibbles
+                    if (upper_element == x) {
+                        c_beta[beta * Q + x]++;
+                    }
+                    if (lower_element == x) {
+                        c_beta[beta * Q + x]++;
+                    }
+                }
+            }
+        }
+    }
+}
 // Initialize P matrix with epsilon value
 void initialize_P_matrix(int inf, int sup) {
 	// By default, each entry can be chosen uniformly randomly.

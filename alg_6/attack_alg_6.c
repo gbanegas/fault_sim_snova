@@ -78,7 +78,7 @@ void sign_digest_esk(uint8_t *pt_signature, const uint8_t *digest,
 	sk_gf16 sk_upk;
 	sk_unpack(&sk_upk, esk);
 
-	uint8_t c_beta[l_SNOVA * Q] = { 0 }; // Counter for occurrences of elements in V columns
+	uint8_t c_beta[l_SNOVA * Q ] = { 0 }; // Counter for occurrences of elements in V columns
 	for (int i = 0; i < 100; i++) {
 		uint8_t V[(v_SNOVA * lsq_SNOVA + 1) >> 1] = { 0 };
 		int success = sign_with_fault_injection(pt_signature, digest,
@@ -97,8 +97,9 @@ void sign_digest_esk(uint8_t *pt_signature, const uint8_t *digest,
 			for (int beta = 0; beta < l_SNOVA; beta++) {
 				for (uint8_t x = 0; x < Q; x++) {
 					// Check for success condition r=1
-					if (c_beta[beta * Q + x] <= Gamma_epsilon_1_sup &&
-							c_beta[beta * Q + x] >= Gamma_epsilon_1_inf) {
+					//printf("c_beta[%d * Q + %d] = %d\n", beta, x, c_beta[beta * Q + x]);
+					if (c_beta[beta * Q + x] <= Gamma_epsilon_1_sup
+							&& c_beta[beta * Q + x] >= Gamma_epsilon_1_inf) {
 						successes_r1++;
 						successes_r2++;  // Count for both r=1 and r=2
 						goto next_run;
@@ -149,7 +150,7 @@ int main() {
 	printf("matrix P:\n");
 	print_P_matrix(P);
 	printf("calculate_Gamma_thresholds\n");
-	int lv = 2 * 37;
+	int lv = l_SNOVA * v_SNOVA;
 	calculate_Gamma_thresholds(lv, epsilon); // Calculate thresholds for success conditions
 	printf("starting experiments\n");
 
