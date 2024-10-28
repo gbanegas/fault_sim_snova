@@ -100,8 +100,8 @@ void compute_stats(uint8_t *V, uint8_t *c_beta) {
 		for (uint8_t x = 0; x < Q; x++) {
 			c_beta[beta * Q + x] = 0;
 			for (int i = 0; i < v_SNOVA; i++) {
-				for (int j = 0; j < v_SNOVA; j++) {
-					if (V[i * l_SNOVA * l_SNOVA + j * l_SNOVA + beta] == x) {
+				for (int j = 0; j < l_SNOVA; j++) {
+					if (V[i * l_SNOVA * l_SNOVA + j * l_SNOVA + beta] == x) { // checks Vi,jb==x
 						c_beta[beta * Q + x]++;
 					}
 				}

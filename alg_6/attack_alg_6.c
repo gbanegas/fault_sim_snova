@@ -78,7 +78,7 @@ void sign_digest_esk(uint8_t *pt_signature, const uint8_t *digest,
 	sk_gf16 sk_upk;
 	sk_unpack(&sk_upk, esk);
 
-	uint8_t c_beta[l_SNOVA * Q * v_SNOVA] = { 0 }; // Counter for occurrences of elements in V columns
+	uint8_t c_beta[l_SNOVA * Q] = { 0 }; // Counter for occurrences of elements in V columns
 	for (int i = 0; i < 100; i++) {
 		uint8_t V[(v_SNOVA * lsq_SNOVA + 1) >> 1] = { 0 };
 		int success = sign_with_fault_injection(pt_signature, digest,
