@@ -146,7 +146,7 @@ int main() {
 	snova_init();
 
 	printf("Starting matrix P\n");
-	initialize_P_matrix(0, 2);
+	initialize_P_matrix(0, 3);
 	printf("matrix P:\n");
 	print_P_matrix(P);
 	printf("calculate_Gamma_thresholds\n");

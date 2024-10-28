@@ -8,7 +8,7 @@
 #ifndef FAULTS_H_
 #define FAULTS_H_
 
-float epsilon = 0.99; // Lower bound for P_ijk
+float epsilon = 0.95; // Lower bound for P_ijk
 // Track counters for success and failure
 int step_2_failures = 0;
 // Parameters for fault probability and the signing matrix
@@ -174,7 +174,7 @@ void initialize_P_matrix(int inf, int sup) {
 	for (int i = 0; i < v_SNOVA; ++i) {
 		for (int j = 0; j < l_SNOVA; ++j) {
 			for (int k = 0; k < l_SNOVA; ++k) {
-				P[i][j][k] = 1/Q;
+				P[i][j][k] = (float)1/Q;
 			}
 		}
 	}
@@ -182,7 +182,7 @@ void initialize_P_matrix(int inf, int sup) {
 	for (int i = 0; i < v_SNOVA; ++i) {
 		for (int j = 0; j < l_SNOVA; ++j) {
 			for (int k = inf; k < sup; ++k) {
-				P[i][j][k] = 1;//random_between_ep_and_1(epsilon); // Vijk holds a fixed value with probability P[i][j][k]
+				P[i][j][k] = random_between_ep_and_1(epsilon); // Vijk holds a fixed value with probability P[i][j][k]
 			}
 		}
 	}
