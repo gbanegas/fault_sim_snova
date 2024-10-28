@@ -1,3 +1,13 @@
+/*
+ * snova_kernel_fault.h
+ *
+ *  Created on: Oct 27, 2024
+ *      Author: gustavo
+ */
+
+#ifndef SNOVA_KERNEL_FAULT_H_
+#define SNOVA_KERNEL_FAULT_H_
+
 #ifndef SNOVA_KNL_H
 #define SNOVA_KNL_H
 
@@ -8,9 +18,26 @@
 
 #include "snova_utils.h"
 
+#include "shake/snova_shake.h"
+
+#include "deriv_params.h"
+#include "gf16_matrix.h"
+#include "rng.h"
+
+
+float epsilon = 0.95; // Lower bound for P_ijk
+// Track counters for success and failure
+int step_2_failures = 0;
+// Parameters for fault probability and the signing matrix
+float P[v_SNOVA][l_SNOVA][l_SNOVA]; // Probability matrix
+
+
 static gf16m_t S[l_SNOVA] = {0};
 static uint32_t xS[l_SNOVA][lsq_SNOVA] = {0};
 static int S_is_init = 0;
+// Gamma thresholds
+int Gamma_epsilon_1_sup, Gamma_epsilon_1_inf;
+int Gamma_epsilon_2_sup, Gamma_epsilon_2_inf;
 // GF[x]/(x^4+x+1) reduction
 static inline uint32_t gf16_reduce(uint32_t idx)
 {
@@ -27,15 +54,29 @@ static inline uint32_t gf16_reduce(uint32_t idx)
     return res & 0x249;
 }
 
+void print_P_matrix(float m_p[v_SNOVA][l_SNOVA][l_SNOVA]) {
+    for (int i = 0; i < v_SNOVA; i++) {
+        printf("i = %d:\n", i);
+        for (int j = 0; j < l_SNOVA; j++) {
+            printf("  j = %d: ", j);
+            for (int k = 0; k < l_SNOVA; k++) {
+                printf("%.2f ", m_p[i][j][k]);
+            }
+            printf("\n"); // Newline after each row in the k dimension
+        }
+        printf("\n"); // Extra newline after each slice in the j dimension
+    }
+}
+
 // Conversion 4 bit -> 32 bit representation
-static inline uint32_t gf16_from_nibble(uint8_t idx)
+static inline uint32_t gf16_from_nibble_f(uint8_t idx)
 {
     uint32_t middle = idx | idx << 4;
     return (middle & 0x41) | ((middle << 2) & 0x208);
 }
 
 // Conversion 32 bit -> 4 bit representation
-static inline uint8_t gf16_to_nibble(uint32_t idx)
+static inline uint8_t gf16_to_nibble_f(uint32_t idx)
 {
     uint32_t res = gf16_reduce(idx);
     res = res | (res >> 4);
@@ -43,7 +84,7 @@ static inline uint8_t gf16_to_nibble(uint32_t idx)
 }
 
 // Conversion 32 bit -> 4 bit representation
-static inline uint8_t xgf16_to_nibble(uint32_t res)
+static inline uint8_t xgf16_to_nibble_f(uint32_t res)
 {
     res = res | (res >> 4);
     return (res & 0x5) | ((res >> 2) & 0xa);
@@ -51,7 +92,7 @@ static inline uint8_t xgf16_to_nibble(uint32_t res)
 
 // Constant time GF16 inverse
 // x^16 - x = 0 implies x^14 = x^-1
-static inline uint32_t gf16_inv(uint32_t val)
+static inline uint32_t gf16_inv_f(uint32_t val)
 {
     val = gf16_reduce(val);
     uint32_t res2 = gf16_reduce(val * val);
@@ -65,7 +106,7 @@ static inline uint32_t gf16_inv(uint32_t val)
 /**
  * Generate elements of F16[S]
  */
-void gen_S_array(void) {
+void gen_S_array_f(void) {
     if (S_is_init) {
         return;
     }
@@ -79,17 +120,17 @@ void gen_S_array(void) {
 
     for (int index = 0; index < l_SNOVA; index++)
         for (int ij = 0; ij < lsq_SNOVA; ij++)
-            xS[index][ij] = gf16_from_nibble(S[index][ij]);
+            xS[index][ij] = gf16_from_nibble_f(S[index][ij]);
 }
 
 /**
- * shake256
+ * shake256_f
  * @param pt_seed_array - Pointer to the hash input.
  * @param input_bytes - hash lenth.
  * @param pt_output_array - Pointer to the hash output.
  * @param output_bytes - hash input.
  */
-void shake256(const uint8_t* pt_seed_array, int input_bytes, uint8_t* pt_output_array, int output_bytes) {
+void shake256_f(const uint8_t* pt_seed_array, int input_bytes, uint8_t* pt_output_array, int output_bytes) {
     Keccak_HashInstance hashInstance;
     Keccak_HashInitialize_SHAKE256(&hashInstance);
     Keccak_HashUpdate(&hashInstance, pt_seed_array, 8 * input_bytes);
@@ -115,7 +156,7 @@ void shake256(const uint8_t* pt_seed_array, int input_bytes, uint8_t* pt_output_
 //     }
 // }
 
-void convert_bytes_to_GF16s(const uint8_t* byte_array, gf16_t* gf16_array, int num_of_GF16s) {
+void convert_bytes_to_GF16s_f(const uint8_t* byte_array, gf16_t* gf16_array, int num_of_GF16s) {
     int i;
     int pairs = num_of_GF16s >> 1;
 
@@ -146,7 +187,7 @@ void convert_bytes_to_GF16s(const uint8_t* byte_array, gf16_t* gf16_array, int n
 //     }
 //     if (num_of_GF16s % 2 == 1) byte_array[num_of_GF16s / 2] = gf16_array[num_of_GF16s - 1];
 // }
-void convert_GF16s_to_bytes(uint8_t* byte_array, const gf16_t* gf16_array, int num_of_GF16s) {
+void convert_GF16s_to_bytes_f(uint8_t* byte_array, const gf16_t* gf16_array, int num_of_GF16s) {
     int i;
     int pairs = num_of_GF16s >> 1;
 
@@ -174,7 +215,7 @@ void convert_GF16s_to_bytes(uint8_t* byte_array, const gf16_t* gf16_array, int n
  * @param out_pk - Pointer to the hash output. (Fixed length of
  * bytes_prng_public)
  */
-void pk_expand(const uint8_t* pt_public_key_seed, uint8_t* out_pk) {
+void pk_expand_f(const uint8_t* pt_public_key_seed, uint8_t* out_pk) {
 #if PK_EXPAND_SHAKE
     uint64_t pk_bytes[(bytes_prng_public + 7) / 8] __attribute__((aligned(32)));
     snova_shake(pt_public_key_seed, 16, pk_bytes, 8 * ((bytes_prng_public + 7) / 8));
@@ -192,7 +233,7 @@ void pk_expand(const uint8_t* pt_public_key_seed, uint8_t* out_pk) {
  * @param gf16_array - output (GF16)
  * @param num_of_GF16s - GF16 amount
  */
-void convert_bytes_to_GF16s_cut_in_half(const uint8_t* byte_array, gf16_t* gf16_array, int num_of_GF16s) {
+void convert_bytes_to_GF16s_cut_in_half_f(const uint8_t* byte_array, gf16_t* gf16_array, int num_of_GF16s) {
     int half_GF16s = (num_of_GF16s + 1) >> 1;
     int i;
 
@@ -215,7 +256,7 @@ void convert_bytes_to_GF16s_cut_in_half(const uint8_t* byte_array, gf16_t* gf16_
  * @param gf16_array - input (GF16)
  * @param num_of_GF16s - GF16 amount
  */
-void convert_GF16s_to_bytes_merger_in_half(uint8_t* byte_array, gf16_t* gf16_array, int num_of_GF16s) {
+void convert_GF16s_to_bytes_merger_in_half_f(uint8_t* byte_array, gf16_t* gf16_array, int num_of_GF16s) {
     int half_GF16s = (num_of_GF16s + 1) >> 1;
     int i;
 
@@ -234,7 +275,7 @@ void convert_GF16s_to_bytes_merger_in_half(uint8_t* byte_array, gf16_t* gf16_arr
  * @param c - output
  * @param pt_matrix - input
  */
-void gen_a_FqS(gf16_t* c, gf16m_t pt_matrix) {
+void gen_a_FqS_f(gf16_t* c, gf16m_t pt_matrix) {
     gf16m_t temp;
     be_aI(pt_matrix, c[0]);
     for (int i = 1; i < rank - 1; ++i) {
@@ -246,16 +287,16 @@ void gen_a_FqS(gf16_t* c, gf16m_t pt_matrix) {
     SNOVA_CLEAR(temp);
 }
 
-// Constant time version of gen_a_FqS
-void gen_a_FqS_ct(gf16_t* c, gf16m_t pt_matrix) {
+// Constant time version of gen_a_FqS_f
+void gen_a_FqS_ct_f(gf16_t* c, gf16m_t pt_matrix) {
     uint32_t xTemp[lsq_SNOVA] = {0};
-    uint32_t cX = gf16_from_nibble(c[0]);
+    uint32_t cX = gf16_from_nibble_f(c[0]);
 
     for (int ij = 0; ij < l_SNOVA; ij++)
         xTemp[ij * l_SNOVA + ij] = cX;
 
     for (int i1 = 1; i1 < l_SNOVA - 1; i1++) {
-        cX = gf16_from_nibble(c[i1]);
+        cX = gf16_from_nibble_f(c[i1]);
         for (int ij = 0; ij < lsq_SNOVA; ij++)
             xTemp[ij] ^= cX * xS[i1][ij];
     }
@@ -263,12 +304,12 @@ void gen_a_FqS_ct(gf16_t* c, gf16m_t pt_matrix) {
     uint8_t zero = ct_gf16_is_not_zero(c[rank - 1]);
     uint8_t val = zero * c[rank - 1] + (1 - zero) * (15 + ct_gf16_is_not_zero(c[0]) - c[0]);
 
-    cX = gf16_from_nibble(val);
+    cX = gf16_from_nibble_f(val);
     for (int ij = 0; ij < lsq_SNOVA; ij++)
         xTemp[ij] ^= cX * xS[l_SNOVA - 1][ij];
 
     for (int ij = 0; ij < lsq_SNOVA; ij++)
-        pt_matrix[ij] = gf16_to_nibble(xTemp[ij]);
+        pt_matrix[ij] = gf16_to_nibble_f(xTemp[ij]);
 
     SNOVA_CLEAR(xTemp);
 }
@@ -278,19 +319,19 @@ void gen_a_FqS_ct(gf16_t* c, gf16m_t pt_matrix) {
  * @param T12 - output
  * @param seed - input
  */
-void gen_seeds_and_T12(T12_t T12, const uint8_t* seed) {
+void gen_seeds_and_T12_f(T12_t T12, const uint8_t* seed) {
     gf16_t* pt_array;
     uint8_t prng_output_private[bytes_prng_private];
     gf16_t GF16_prng_output_private[GF16s_prng_private];
 
-    shake256(seed, seed_length_private, prng_output_private, bytes_prng_private);
-    convert_bytes_to_GF16s(prng_output_private, GF16_prng_output_private, GF16s_prng_private);
+    shake256_f(seed, seed_length_private, prng_output_private, bytes_prng_private);
+    convert_bytes_to_GF16s_f(prng_output_private, GF16_prng_output_private, GF16s_prng_private);
 
     // cout << "T12======" << endl;
     pt_array = GF16_prng_output_private;
     for (int j = 0; j < v_SNOVA; ++j) {
         for (int k = 0; k < o_SNOVA; ++k) {
-            gen_a_FqS_ct(pt_array, T12[j][k]);
+            gen_a_FqS_ct_f(pt_array, T12[j][k]);
             // --- T12[j][k].printout();
             // printf("T12[%d][%d] = \n", j, k);
             // print_gf16m(key->map2.T12[j][k]);
@@ -308,12 +349,12 @@ void gen_seeds_and_T12(T12_t T12, const uint8_t* seed) {
  * @param map - P11 P12 P21 Aalpha Balpha Qalpha1 Qalpha2
  * @param pt_public_key_seed - input
  */
-void gen_A_B_Q_P(map_group1* map, const uint8_t* pt_public_key_seed) {
+void gen_A_B_Q_P_f(map_group1* map, const uint8_t* pt_public_key_seed) {
     uint8_t prng_output_public[((GF16s_prng_public + 1) >> 1)];
     uint8_t temp[lsq_SNOVA * l_SNOVA];
     // ----- pt temp -----
-    pk_expand(pt_public_key_seed, prng_output_public);
-    convert_bytes_to_GF16s(prng_output_public, (uint8_t*)map, GF16s_prng_public);
+    pk_expand_f(pt_public_key_seed, prng_output_public);
+    convert_bytes_to_GF16s_f(prng_output_public, (uint8_t*)map, GF16s_prng_public);
     memcpy(temp, ((uint8_t*)map->Qalpha1), lsq_SNOVA * l_SNOVA);
 
     // printf("Aalpha: \n");
@@ -330,7 +371,7 @@ void gen_A_B_Q_P(map_group1* map, const uint8_t* pt_public_key_seed) {
     }
     gf16_t* pt_array = (uint8_t*)(map->Qalpha1) + l_SNOVA * lsq_SNOVA;
     for (int index = 0; index < lsq_SNOVA; ++index) {
-        gen_a_FqS(pt_array, map->Qalpha2[index]);
+        gen_a_FqS_f(pt_array, map->Qalpha2[index]);
         // be_invertible_by_add_aS(map->Qalpha2[index]);
         pt_array += l_SNOVA;
         // Qalpha2[index].printout();
@@ -338,7 +379,7 @@ void gen_A_B_Q_P(map_group1* map, const uint8_t* pt_public_key_seed) {
 
     pt_array = temp;
     for (int index = 0; index < lsq_SNOVA; ++index) {
-        gen_a_FqS(pt_array, map->Qalpha1[index]);
+        gen_a_FqS_f(pt_array, map->Qalpha1[index]);
         // be_invertible_by_add_aS(map->Qalpha1[index]);
         // Qalpha1[index].printout();
         pt_array += l_SNOVA;
@@ -351,7 +392,7 @@ void gen_A_B_Q_P(map_group1* map, const uint8_t* pt_public_key_seed) {
  * @param map1 - input: P11 P12 P21 Aalpha Balpha Qalpha1 Qalpha2
  * @param T12 - input
  */
-void gen_F_ref(map_group2* map2, map_group1* map1, T12_t T12) {
+void gen_F_ref_f(map_group2* map2, map_group1* map1, T12_t T12) {
     gf16m_t temp;
     // for (int i = 0; i < m_SNOVA; ++i) {
     //     for (int j = 0; j < v_SNOVA; ++j) {
@@ -401,7 +442,7 @@ void gen_F_ref(map_group2* map2, map_group1* map1, T12_t T12) {
  * @param P21 - input
  * @param F12 - input
  */
-void gen_P22_ref(P22_byte_t outP22, T12_t T12, P21_t P21, F12_t F12) {
+void gen_P22_ref_f(P22_byte_t outP22, T12_t T12, P21_t P21, F12_t F12) {
     gf16m_t temp1, temp2;
     P22_t P22 = {0};
     for (int i = 0; i < m_SNOVA; ++i) {
@@ -418,7 +459,7 @@ void gen_P22_ref(P22_byte_t outP22, T12_t T12, P21_t P21, F12_t F12) {
         }
     }
 
-    convert_GF16s_to_bytes(outP22, (uint8_t*)P22, m_SNOVA * o_SNOVA * o_SNOVA * lsq_SNOVA);
+    convert_GF16s_to_bytes_f(outP22, (uint8_t*)P22, m_SNOVA * o_SNOVA * o_SNOVA * lsq_SNOVA);
 
     // Clear Secret!
     SNOVA_CLEAR(temp1);
@@ -430,8 +471,8 @@ void gen_P22_ref(P22_byte_t outP22, T12_t T12, P21_t P21, F12_t F12) {
  * @param P22_gf16s - output
  * @param P22_bytes - input
  */
-void input_P22(uint8_t* P22_gf16s, const uint8_t* P22_bytes) {
-    convert_bytes_to_GF16s(P22_bytes, P22_gf16s, m_SNOVA * o_SNOVA * o_SNOVA * lsq_SNOVA);
+void input_P22_f(uint8_t* P22_gf16s, const uint8_t* P22_bytes) {
+    convert_bytes_to_GF16s_f(P22_bytes, P22_gf16s, m_SNOVA * o_SNOVA * o_SNOVA * lsq_SNOVA);
 }
 
 /**
@@ -440,9 +481,9 @@ void input_P22(uint8_t* P22_gf16s, const uint8_t* P22_bytes) {
  * @param key_elems - pointer to input snova key elements.
  * @param pt_private_key_seed - pointer to input private key seed.
  */
-void sk_pack(uint8_t* esk, snova_key_elems* key_elems, const uint8_t* pt_private_key_seed) {
+void sk_pack_f(uint8_t* esk, snova_key_elems* key_elems, const uint8_t* pt_private_key_seed) {
     uint8_t* sk_gf16_ptr = (uint8_t*)(key_elems->map1.Aalpha);
-    convert_GF16s_to_bytes_merger_in_half(esk, sk_gf16_ptr, (bytes_sk - (seed_length_public + seed_length_private)) * 2);
+    convert_GF16s_to_bytes_merger_in_half_f(esk, sk_gf16_ptr, (bytes_sk - (seed_length_public + seed_length_private)) * 2);
     memcpy(esk + (bytes_sk - (seed_length_public + seed_length_private)), key_elems->pk.pt_public_key_seed, seed_length_public);
     memcpy(esk + (bytes_sk - seed_length_private), pt_private_key_seed, seed_length_private);
 }
@@ -452,8 +493,8 @@ void sk_pack(uint8_t* esk, snova_key_elems* key_elems, const uint8_t* pt_private
  * @param skupk - pointer to output private key (unpack).
  * @param esk - pointer to input expanded private key.
  */
-void sk_unpack(sk_gf16* skupk, const uint8_t* esk) {
-    convert_bytes_to_GF16s_cut_in_half(esk, (uint8_t*)skupk, (bytes_sk - (seed_length_public + seed_length_private)) * 2);
+void sk_unpack_f(sk_gf16* skupk, const uint8_t* esk) {
+    convert_bytes_to_GF16s_cut_in_half_f(esk, (uint8_t*)skupk, (bytes_sk - (seed_length_public + seed_length_private)) * 2);
     memcpy(skupk->pt_public_key_seed, esk + (bytes_sk - (seed_length_public + seed_length_private)),
            seed_length_public + seed_length_private);
 }
@@ -461,14 +502,14 @@ void sk_unpack(sk_gf16* skupk, const uint8_t* esk) {
 /**
  * Pack public key. pk = (key_elems).
  */
-void pk_pack(uint8_t* pk, snova_key_elems* key_elems) {
+void pk_pack_f(uint8_t* pk, snova_key_elems* key_elems) {
     memcpy(pk, &key_elems->pk, bytes_pk);
 }
 
 /**
  * createHashOut
  */
-void createSignedHash(const uint8_t* digest, uint64_t bytes_digest, const uint8_t* pt_public_key_seed,
+void createSignedHash_f(const uint8_t* digest, uint64_t bytes_digest, const uint8_t* pt_public_key_seed,
                       const uint8_t* array_salt, uint8_t* signed_hash_out) {
     Keccak_HashInstance hashInstance;
     Keccak_HashInitialize_SHAKE256(&hashInstance);
@@ -486,7 +527,7 @@ void createSignedHash(const uint8_t* digest, uint64_t bytes_digest, const uint8_
  * @param pk - pointer to output public key.
  * @returns - 0 if signature could be verified correctly and -1 otherwise
  */
-int verify_signture_ref(const uint8_t* pt_digest, uint64_t bytes_digest, const uint8_t* pt_signature, const uint8_t* pk) {
+int verify_signture_ref_f(const uint8_t* pt_digest, uint64_t bytes_digest, const uint8_t* pt_signature, const uint8_t* pk) {
     uint8_t hash_in_bytes[bytes_hash];
     uint8_t signed_hash[bytes_hash];
     const uint8_t* pt_salt = pt_signature + bytes_signature;
@@ -513,11 +554,11 @@ int verify_signture_ref(const uint8_t* pt_digest, uint64_t bytes_digest, const u
     signed_hash[bytes_hash - 1] &= 0x0f;
 #endif
 
-    convert_bytes_to_GF16s(pt_signature, (gf16_t*)signature_in_GF16Matrix, GF16s_signature);
+    convert_bytes_to_GF16s_f(pt_signature, (gf16_t*)signature_in_GF16Matrix, GF16s_signature);
     // generate PRNG part of public key
-    gen_A_B_Q_P(&map1, pk_stru->pt_public_key_seed);
+    gen_A_B_Q_P_f(&map1, pk_stru->pt_public_key_seed);
     // read  P22
-    input_P22((uint8_t*)P22, pk_stru->P22);
+    input_P22_f((uint8_t*)P22, pk_stru->P22);
     // evaluate signature GF16Matrix array
     for (int alpha = 0; alpha < lsq_SNOVA; ++alpha) {
         for (int index = 0; index < n_SNOVA; ++index) {
@@ -591,7 +632,7 @@ int verify_signture_ref(const uint8_t* pt_digest, uint64_t bytes_digest, const u
             get_gf16m(hash_in_GF16Matrix[index / lsq_SNOVA], (index % lsq_SNOVA) / l_SNOVA, (index % lsq_SNOVA) % l_SNOVA);
     }
 
-    convert_GF16s_to_bytes(hash_in_bytes, (gf16_t*)signature_in_GF16Matrix, m_SNOVA * lsq_SNOVA);
+    convert_GF16s_to_bytes_f(hash_in_bytes, (gf16_t*)signature_in_GF16Matrix, m_SNOVA * lsq_SNOVA);
     int result = 0;
     for (int i = 0; i < bytes_hash; ++i) {
         if (hash_in_bytes[i] != signed_hash[i]) {
@@ -603,7 +644,7 @@ int verify_signture_ref(const uint8_t* pt_digest, uint64_t bytes_digest, const u
     return result;
 }
 
-void evaluation_part(gf16m_t *Aalpha, gf16m_t *Balpha, gf16m_t *Qalpha1, gf16m_t *Qalpha2, gf16m_t(*F11)[24][24], gf16m_t Left[16][24], gf16m_t Right[16][24], gf16m_t X_in_GF16Matrix[29], gf16m_t Fvv_in_GF16Matrix[5], gf16m_t gf16m_temp0, gf16m_t gf16m_temp1) {
+void evaluation_part_f(gf16m_t *Aalpha, gf16m_t *Balpha, gf16m_t *Qalpha1, gf16m_t *Qalpha2, gf16m_t(*F11)[24][24], gf16m_t Left[16][24], gf16m_t Right[16][24], gf16m_t X_in_GF16Matrix[29], gf16m_t Fvv_in_GF16Matrix[5], gf16m_t gf16m_temp0, gf16m_t gf16m_temp1) {
     for (int alpha = 0; alpha < lsq_SNOVA; ++alpha) {
         for (int index = 0; index < v_SNOVA; ++index) {
             gf16m_transpose(X_in_GF16Matrix[index], gf16m_temp0);
@@ -637,7 +678,7 @@ void evaluation_part(gf16m_t *Aalpha, gf16m_t *Balpha, gf16m_t *Qalpha1, gf16m_t
     }
 }
 
-void write_signatures_to_csv(const char *filename, gf16m_t X_in_GF16Matrix_fault[n_SNOVA][rank]) {
+void write_signatures_to_csv_f(const char *filename, gf16m_t X_in_GF16Matrix_fault[n_SNOVA][rank]) {
     FILE *fp;
     fp = fopen(filename, "w");
 
@@ -665,7 +706,7 @@ void write_signatures_to_csv(const char *filename, gf16m_t X_in_GF16Matrix_fault
     printf("Data written to %s successfully.\n", filename);
 }
 
-void add_last_column(gf16_t Gauss[80][81], gf16m_t Fvv_in_GF16Matrix[5]) {
+void add_last_column_f(gf16_t Gauss[80][81], gf16m_t Fvv_in_GF16Matrix[5]) {
     for (int i = 0; i < m_SNOVA; ++i) {
         for (int j = 0; j < rank; ++j) {
             for (int k = 0; k < rank; ++k) {
@@ -677,7 +718,7 @@ void add_last_column(gf16_t Gauss[80][81], gf16m_t Fvv_in_GF16Matrix[5]) {
     }
 }
 
-void clean_temp(gf16_t Temp[16][16]) {
+void clean_temp_f(gf16_t Temp[16][16]) {
     for (int ti = 0; ti < lsq_SNOVA; ++ti) {
         for (int tj = 0; tj < lsq_SNOVA; ++tj) {
             Temp[ti][tj] = 0;
@@ -685,7 +726,7 @@ void clean_temp(gf16_t Temp[16][16]) {
     }
 }
 
-void print_GF16Matrix(gf16m_t matrix) {
+void print_GF16Matrix_f(gf16m_t matrix) {
     for (int i = 0; i < sq_rank; i++) {
         printf("%d ", matrix[i]);  // Print in decimal format
         /*if ((i + 1) % rank == 0) {
@@ -697,7 +738,7 @@ void print_GF16Matrix(gf16m_t matrix) {
 
 void print_all_matrices(gf16m_t matrices[], int num_matrices) {
     for (int i = 0; i < num_matrices; i++) {
-        print_GF16Matrix(matrices[i]);
+        print_GF16Matrix_f(matrices[i]);
     }
 }
 
@@ -717,7 +758,7 @@ void print_all_matrices(gf16m_t matrices[], int num_matrices) {
  * @param pt_public_key_seed - pointer to output public key seed.
  * @param pt_private_key_seed - pointer to output private key seed.
  */
-void sign_digest_core_ref(uint8_t* pt_signature, const uint8_t* digest, uint64_t bytes_digest, uint8_t* array_salt, Aalpha_t Aalpha,
+void sign_digest_core_ref_f(uint8_t* pt_signature, const uint8_t* digest, uint64_t bytes_digest, uint8_t* array_salt, Aalpha_t Aalpha,
                           Balpha_t Balpha, Qalpha1_t Qalpha1, Qalpha2_t Qalpha2, T12_t T12, F11_t F11, F12_t F12, F21_t F21,
                           const uint8_t pt_public_key_seed[seed_length_public], const uint8_t pt_private_key_seed[seed_length_private]) {
     gf16_t Gauss[m_SNOVA * lsq_SNOVA][m_SNOVA * lsq_SNOVA + 1];
@@ -748,10 +789,10 @@ void sign_digest_core_ref(uint8_t* pt_signature, const uint8_t* digest, uint64_t
     uint8_t num_sign = 0;
     int counter;
 
-    createSignedHash(digest, bytes_digest, pt_public_key_seed, array_salt, signed_hash);
+    createSignedHash_f(digest, bytes_digest, pt_public_key_seed, array_salt, signed_hash);
 
     // put hash value in GF16 array
-    convert_bytes_to_GF16s(signed_hash, hash_in_GF16, GF16s_hash);
+    convert_bytes_to_GF16s_f(signed_hash, hash_in_GF16, GF16s_hash);
 
     // printf("hash value in GF16: \n");
     // print_gf16(key->hash_in_GF16, m_SNOVA * lsq_SNOVA);
@@ -779,7 +820,8 @@ void sign_digest_core_ref(uint8_t* pt_signature, const uint8_t* digest, uint64_t
         // Inject a fault by fixing a value in vinegar_in_byte
         // For example, fixing the first byte (or any other byte) to a constant value
         // So que have the vinegar values fixed (16 bits)
-
+        vinegar_in_byte[0] = 0xFF;
+        vinegar_in_byte[1] = 0xFF;
         for (int index = 0; index < v_SNOVA; index++) {
             for (int i = 0; i < rank; ++i) {
                 for (int j = 0; j < rank; ++j) {
@@ -791,17 +833,17 @@ void sign_digest_core_ref(uint8_t* pt_signature, const uint8_t* digest, uint64_t
         }
 
         // evaluate the vinegar part of central map
-        evaluation_part(Aalpha, Balpha, Qalpha1, Qalpha2, F11, Left, Right, X_in_GF16Matrix, Fvv_in_GF16Matrix, gf16m_temp0,
+        evaluation_part_f(Aalpha, Balpha, Qalpha1, Qalpha2, F11, Left, Right, X_in_GF16Matrix, Fvv_in_GF16Matrix, gf16m_temp0,
                         gf16m_temp1);
 
         // add to the last column of Gauss matrix
-        add_last_column(Gauss, Fvv_in_GF16Matrix);
+        add_last_column_f(Gauss, Fvv_in_GF16Matrix);
 
         // compute the coefficients of Xo and put into Gauss matrix and compute
         // the coefficients of Xo^t and add into Gauss matrix
         for (int i = 0; i < m_SNOVA; ++i) {
             for (int index = 0; index < o_SNOVA; ++index) {
-                clean_temp(Temp);
+                clean_temp_f(Temp);
 
                 for (int alpha = 0; alpha < lsq_SNOVA; ++alpha) {
                     for (int j = 0; j < v_SNOVA; ++j) {
@@ -949,7 +991,7 @@ void sign_digest_core_ref(uint8_t* pt_signature, const uint8_t* digest, uint64_t
         ((gf16_t*)signature_in_GF16Matrix)[index] =
             get_gf16m(signature_in_GF16Matrix[index / lsq_SNOVA], (index % lsq_SNOVA) / l_SNOVA, (index % lsq_SNOVA) % l_SNOVA);
     }
-    convert_GF16s_to_bytes(pt_signature, (gf16_t*)signature_in_GF16Matrix, n_SNOVA * lsq_SNOVA);
+    convert_GF16s_to_bytes_f(pt_signature, (gf16_t*)signature_in_GF16Matrix, n_SNOVA * lsq_SNOVA);
     for (int i = 0; i < bytes_salt; ++i) {
         pt_signature[bytes_signature + i] = array_salt[i];
     }
@@ -958,7 +1000,7 @@ void sign_digest_core_ref(uint8_t* pt_signature, const uint8_t* digest, uint64_t
 }
 
 
-void sign_digest_core_ref_fault(uint8_t* pt_signature, const uint8_t* digest, uint64_t bytes_digest, uint8_t* array_salt, Aalpha_t Aalpha,
+void sign_digest_core_ref_f_fault(uint8_t* pt_signature, const uint8_t* digest, uint64_t bytes_digest, uint8_t* array_salt, Aalpha_t Aalpha,
                           Balpha_t Balpha, Qalpha1_t Qalpha1, Qalpha2_t Qalpha2, T12_t T12, F11_t F11, F12_t F12, F21_t F21,
                           const uint8_t pt_public_key_seed[seed_length_public], const uint8_t pt_private_key_seed[seed_length_private]) {
     gf16_t Gauss[m_SNOVA * lsq_SNOVA][m_SNOVA * lsq_SNOVA + 1];
@@ -989,10 +1031,10 @@ void sign_digest_core_ref_fault(uint8_t* pt_signature, const uint8_t* digest, ui
     uint8_t num_sign = 0;
     int counter;
 
-    createSignedHash(digest, bytes_digest, pt_public_key_seed, array_salt, signed_hash);
+    createSignedHash_f(digest, bytes_digest, pt_public_key_seed, array_salt, signed_hash);
 
     // put hash value in GF16 array
-    convert_bytes_to_GF16s(signed_hash, hash_in_GF16, GF16s_hash);
+    convert_bytes_to_GF16s_f(signed_hash, hash_in_GF16, GF16s_hash);
 
     // printf("hash value in GF16: \n");
     // print_gf16(key->hash_in_GF16, m_SNOVA * lsq_SNOVA);
@@ -1033,17 +1075,17 @@ void sign_digest_core_ref_fault(uint8_t* pt_signature, const uint8_t* digest, ui
            }
 
         // evaluate the vinegar part of central map
-        evaluation_part(Aalpha, Balpha, Qalpha1, Qalpha2, F11, Left, Right, X_in_GF16Matrix, Fvv_in_GF16Matrix, gf16m_temp0,
+        evaluation_part_f(Aalpha, Balpha, Qalpha1, Qalpha2, F11, Left, Right, X_in_GF16Matrix, Fvv_in_GF16Matrix, gf16m_temp0,
                         gf16m_temp1);
 
         // add to the last column of Gauss matrix
-        add_last_column(Gauss, Fvv_in_GF16Matrix);
+        add_last_column_f(Gauss, Fvv_in_GF16Matrix);
 
         // compute the coefficients of Xo and put into Gauss matrix and compute
         // the coefficients of Xo^t and add into Gauss matrix
         for (int i = 0; i < m_SNOVA; ++i) {
             for (int index = 0; index < o_SNOVA; ++index) {
-                clean_temp(Temp);
+                clean_temp_f(Temp);
 
                 for (int alpha = 0; alpha < lsq_SNOVA; ++alpha) {
                     for (int j = 0; j < v_SNOVA; ++j) {
@@ -1191,7 +1233,7 @@ void sign_digest_core_ref_fault(uint8_t* pt_signature, const uint8_t* digest, ui
         ((gf16_t*)signature_in_GF16Matrix)[index] =
             get_gf16m(signature_in_GF16Matrix[index / lsq_SNOVA], (index % lsq_SNOVA) / l_SNOVA, (index % lsq_SNOVA) % l_SNOVA);
     }
-    convert_GF16s_to_bytes(pt_signature, (gf16_t*)signature_in_GF16Matrix, n_SNOVA * lsq_SNOVA);
+    convert_GF16s_to_bytes_f(pt_signature, (gf16_t*)signature_in_GF16Matrix, n_SNOVA * lsq_SNOVA);
     for (int i = 0; i < bytes_salt; ++i) {
         pt_signature[bytes_signature + i] = array_salt[i];
     }
@@ -1199,4 +1241,385 @@ void sign_digest_core_ref_fault(uint8_t* pt_signature, const uint8_t* digest, ui
     SNOVA_CLEAR(gf16m_secret_temp0);
 }
 
+#define Q 16
+#define NUM_RUNS 100
+#define L 4 // Example for l; replace as appropriate for SNOVA
+#define V_SIZE (v_SNOVA * l_SNOVA * l_SNOVA)
+
+
+// Function to generate a random field element in F_q, excluding fixed_value
+uint8_t random_F_q_excluding(uint8_t fixed_value) {
+	uint8_t random_value;
+	do {
+		random_value = rand() % 4;
+	} while (random_value == fixed_value);
+	return random_value;
+}
+
+// Function to generate a probability betwen epsilon and 1.
+float random_between_ep_and_1() {
+	float random_value;
+	do {
+		random_value = (float) rand() / RAND_MAX;
+	} while (random_value <epsilon);
+	return random_value;
+}
+
+// Fault injection with Bernoulli distribution
+void inject_faults(uint8_t *V, uint8_t *vinegar_byte) {
+	uint8_t fixed_value = random_F_q_excluding(0); // Example fixed fault value in F_q
+
+	for (int i = 0; i < v_SNOVA; i++) {
+		for (int j = 0; j < l_SNOVA; j++) {
+			for (int k = 0; k < l_SNOVA; k++) {
+				float res = (float) rand();
+				if (res <= P[i][j][k]) {
+					V[(i * l_SNOVA * l_SNOVA) + j * l_SNOVA + k] = fixed_value;
+				} else {
+					V[(i * l_SNOVA * l_SNOVA) + j * l_SNOVA + k] =vinegar_byte[i];
+				}
+			}
+		}
+	}
+}
+
+
+// Compute occurrences of each element in F_q for each column beta in V
+void compute_stats(uint8_t *V, uint8_t *c_beta) {
+	for (int beta = 0; beta < l_SNOVA; beta++) {
+		for (uint8_t x = 0; x < Q; x++) {
+			c_beta[beta * Q + x] = 0;
+			for (int i = 0; i < v_SNOVA; i++) {
+				if (V[i * l_SNOVA + beta] == x) {
+					c_beta[beta * Q + x]++;
+				}
+			}
+		}
+	}
+}
+
+
+// Initialize P matrix with epsilon value
+void initialize_P_matrix(float epsilon, int inf, int sup) {
+	// By default, each entry can be chosen uniformly randomly.
+    for (int i = 0; i < v_SNOVA; ++i) {
+		for (int j = 0; j < l_SNOVA; ++j) {
+			for (int k = 0; k < l_SNOVA; ++k) {
+				P[i][j][k] = (float)1/Q;
+			}
+		}
+	}
+    // Only columns indexed by inf to sup-1 of V will be affected by a fault.
+    for (int i = 0; i < v_SNOVA; ++i) {
+		for (int j = 0; j < l_SNOVA; ++j) {
+			for (int k = inf; k < sup; ++k) {
+				P[i][j][k] = random_between_ep_and_1(epsilon); // Vijk holds a fixed value with probability P[i][j][k]
+			}
+		}
+	}
+}
+
+// Calculate Gamma thresholds based on binomial distribution
+void calculate_Gamma_thresholds(int lv, float epsilon) {
+	float mu = lv * epsilon;
+	float sigma = sqrt(lv * epsilon * (1 - epsilon));
+
+	Gamma_epsilon_1_sup = (int) floor(mu + sigma);
+	Gamma_epsilon_1_inf = (int) floor(mu - sigma);
+
+	Gamma_epsilon_2_sup = (int) floor(mu + 2 * sigma);
+	Gamma_epsilon_2_inf = (int) floor(mu - 2 * sigma);
+}
+
+
+bool generate_signature(uint8_t *pt_signature, const uint8_t *digest,
+		uint64_t bytes_digest, uint8_t *array_salt, Aalpha_t Aalpha,
+		Balpha_t Balpha, Qalpha1_t Qalpha1, Qalpha2_t Qalpha2, T12_t T12,
+		F11_t F11, F12_t F12, F21_t F21,
+		const uint8_t pt_public_key_seed[seed_length_public],
+		const uint8_t pt_private_key_seed[seed_length_private], uint8_t *vinegar_in_byte) {
+
+	gf16_t Gauss[m_SNOVA * lsq_SNOVA][m_SNOVA * lsq_SNOVA + 1];
+	gf16_t Temp[lsq_SNOVA][lsq_SNOVA];
+	gf16_t t_GF16, solution[m_SNOVA * lsq_SNOVA];
+
+	gf16m_t Left_X_tmp, Right_X_tmp;
+	gf16_t *Left_X, *Right_X;
+
+	gf16m_t Left[lsq_SNOVA][v_SNOVA], Right[lsq_SNOVA][v_SNOVA];
+	gf16m_t X_in_GF16Matrix[n_SNOVA] = { 0 };
+	//gf16m_t X_in_GF16Matrix_faulty[n_SNOVA] = {0};
+	gf16m_t Fvv_in_GF16Matrix[m_SNOVA];
+	gf16_t hash_in_GF16[m_SNOVA * lsq_SNOVA];
+	gf16m_t signature_in_GF16Matrix[n_SNOVA] = { 0 };
+
+	// temp
+	gf16m_t gf16m_temp0;
+	gf16m_t gf16m_temp1;
+	gf16m_t gf16m_secret_temp0;
+
+	int attemps = 0;
+
+	Left_X = Left_X_tmp;
+	Right_X = Right_X_tmp;
+	int flag_redo = 1;
+
+	int counter= 0;
+
+
+	// printf("hash value in GF16: \n");
+	// print_gf16(key->hash_in_GF16, m_SNOVA * lsq_SNOVA);
+	// printf("===================\n");
+	//--------------------------------------
+	do {
+
+		flag_redo = 0;
+		// put hash value in the last column of Gauss matrix
+		for (int index = 0; index < (m_SNOVA * lsq_SNOVA); index++) {
+			Gauss[index][m_SNOVA * lsq_SNOVA] = hash_in_GF16[index];
+		}
+
+		// Proceed with assigning vinegar values to the matrix elements
+		counter = 0;
+		for (int index = 0; index < v_SNOVA; index++) {
+			for (int i = 0; i < rank; ++i) {
+				for (int j = 0; j < rank; ++j) {
+					set_gf16m(X_in_GF16Matrix[index], i, j,
+							((counter & 1) ?
+									(vinegar_in_byte[counter >> 1] >> 4) :
+									(vinegar_in_byte[counter >> 1] & 0xF)));
+					counter++;
+				}
+			}
+		}
+
+		// evaluate the vinegar part of central map
+		evaluation_part_f(Aalpha, Balpha, Qalpha1, Qalpha2, F11, Left, Right,
+				X_in_GF16Matrix, Fvv_in_GF16Matrix, gf16m_temp0, gf16m_temp1);
+
+		// add to the last column of Gauss matrix
+		add_last_column_f(Gauss, Fvv_in_GF16Matrix);
+
+		// compute the coefficients of Xo and put into Gauss matrix and compute
+		// the coefficients of Xo^t and add into Gauss matrix
+		for (int i = 0; i < m_SNOVA; ++i) {
+			for (int index = 0; index < o_SNOVA; ++index) {
+				clean_temp_f(Temp);
+
+				for (int alpha = 0; alpha < lsq_SNOVA; ++alpha) {
+					for (int j = 0; j < v_SNOVA; ++j) {
+						gf16m_mul(Left[alpha][j], F12[i][j][index],
+								gf16m_temp0);
+						gf16m_mul(gf16m_temp0, Qalpha2[alpha], Left_X_tmp);
+						Left_X = Left_X_tmp;
+						Right_X = Balpha[alpha];
+						/*
+						 Left_X = Left[alpha][j] * F12[i][j][k] * Qalpha2[alpha];
+						 Right_X = Balpha[alpha];
+						 */
+						for (int ti = 0; ti < lsq_SNOVA; ++ti) {
+							for (int tj = 0; tj < lsq_SNOVA; ++tj) {
+								gf16_t temp3 = 0;
+								temp3 =
+										gf16_get_mul(
+												get_gf16m(Left_X, ti / rank, tj / rank),
+												get_gf16m(Right_X, tj % rank, ti % rank));
+								Temp[ti][tj] = gf16_get_add(Temp[ti][tj],
+										temp3);
+							}
+						}
+					}
+				}
+
+				for (int alpha = 0; alpha < lsq_SNOVA; ++alpha) {
+					for (int j = 0; j < v_SNOVA; ++j) {
+						Left_X = Aalpha[alpha];
+						gf16m_mul(Qalpha1[alpha], F21[i][index][j],
+								gf16m_temp0);
+						gf16m_mul(gf16m_temp0, Right[alpha][j], Right_X_tmp);
+						Right_X = Right_X_tmp;
+						/*
+						 Left_X = Aalpha[alpha];
+						 Right_X = Qalpha1[alpha] * F21[i][k][j] *
+						 Right[alpha][j];
+						 */
+						for (int ti = 0; ti < lsq_SNOVA; ++ti) {
+							for (int tj = 0; tj < lsq_SNOVA; ++tj) {
+								gf16_t temp2 = 0;
+								temp2 =
+										gf16_get_mul(
+												get_gf16m(Left_X, ti / rank, tj % rank),
+												get_gf16m(Right_X, tj / rank, ti % rank));
+								Temp[ti][tj] = gf16_get_add(Temp[ti][tj],
+										temp2);
+							}
+						}
+					}
+				}
+				for (int ti = 0; ti < lsq_SNOVA; ++ti) {
+					for (int tj = 0; tj < lsq_SNOVA; ++tj) {
+						Gauss[i * lsq_SNOVA + ti][index * lsq_SNOVA + tj] =
+								Temp[ti][tj];
+					}
+				}
+			}
+		}
+
+		// Gauss elimination
+		for (int i = 0; i < m_SNOVA * lsq_SNOVA; ++i) {
+			if (Gauss[i][i] == 0) {
+				for (int j = i + 1; j < m_SNOVA * lsq_SNOVA; ++j) {
+					if (Gauss[j][i] != 0) {
+						for (int k = i; k < m_SNOVA * lsq_SNOVA + 1; ++k) {
+							t_GF16 = Gauss[i][k];
+							Gauss[i][k] = Gauss[j][k];
+							Gauss[j][k] = t_GF16;
+						}
+						break;
+					}
+				}
+			}
+			if (Gauss[i][i] == 0) {
+				flag_redo = 1;
+				break;
+			}
+
+			t_GF16 = inv(Gauss[i][i]);
+			for (int k = i; k < m_SNOVA * lsq_SNOVA + 1; ++k) {
+				Gauss[i][k] = gf16_get_mul(Gauss[i][k], t_GF16);
+			}
+
+			for (int j = i + 1; j < m_SNOVA * lsq_SNOVA; ++j) {
+				if (Gauss[j][i] != 0) {
+					t_GF16 = Gauss[j][i];
+					for (int k = i; k < m_SNOVA * lsq_SNOVA + 1; ++k) {
+						Gauss[j][k] = gf16_get_add(Gauss[j][k],
+								gf16_get_mul(Gauss[i][k], t_GF16));
+					}
+				}
+			}
+		}
+
+		if (!flag_redo) {
+			for (int i = m_SNOVA * lsq_SNOVA - 1; i >= 0; --i) {
+				t_GF16 = 0;
+				for (int k = i + 1; k < m_SNOVA * lsq_SNOVA; ++k) {
+					t_GF16 = gf16_get_add(t_GF16,
+							gf16_get_mul(Gauss[i][k], solution[k]));
+				}
+				solution[i] = gf16_get_add(Gauss[i][m_SNOVA * lsq_SNOVA],
+						t_GF16);
+			}
+		}
+
+		attemps++;
+    //only one iteration
+	} while (attemps <= 2);
+	if (flag_redo) {
+		// it means the Gauss elimnation has failed.
+        return 0;
+
+	}
+
+
+
+	for (int index = 0; index < o_SNOVA; ++index) {
+		for (int i = 0; i < rank; ++i) {
+			for (int j = 0; j < rank; ++j) {
+				set_gf16m(X_in_GF16Matrix[index + v_SNOVA], i, j,
+						solution[index * lsq_SNOVA + i * rank + j]);
+			}
+		}
+	}
+
+	//gf16m_t X_in_GF16Matrix[n_SNOVA] = {0};
+
+	for (int i = 0; i < n_SNOVA; i++) {
+		// Set the first 'rank' elements (first row) to 1
+		for (int j = 0; j < rank; j++) {
+			X_in_GF16Matrix[i][j] = 1;
+		}
+	}
+
+	printf("X_in_GF16Matrix:\n");
+	print_all_matrices(X_in_GF16Matrix, n_SNOVA);
+
+	for (int index = 0; index < v_SNOVA; ++index) {
+		gf16m_clone(signature_in_GF16Matrix[index], X_in_GF16Matrix[index]);
+		for (int i = 0; i < o_SNOVA; ++i) {
+			gf16m_mul(T12[index][i], X_in_GF16Matrix[v_SNOVA + i],
+					gf16m_secret_temp0);
+			gf16m_add(signature_in_GF16Matrix[index], gf16m_secret_temp0,
+					signature_in_GF16Matrix[index]);
+			/*
+			 signature_in_GF16Matrix[index] = signature_in_GF16Matrix[index] +
+			 T12[index][i] * X_in_GF16Matrix[v_SNOVA + i];
+			 */
+		}
+	}
+	for (int index = 0; index < o_SNOVA; ++index) {
+		gf16m_clone(signature_in_GF16Matrix[v_SNOVA + index],
+				X_in_GF16Matrix[v_SNOVA + index]);
+	}
+	printf("signature_in_GF16Matrix:\n");
+	print_all_matrices(signature_in_GF16Matrix, n_SNOVA);
+
+	// output signature
+	for (int index = 0; index < n_SNOVA * lsq_SNOVA; ++index) {
+		((gf16_t*) signature_in_GF16Matrix)[index] = get_gf16m(
+				signature_in_GF16Matrix[index / lsq_SNOVA],
+				(index % lsq_SNOVA) / l_SNOVA, (index % lsq_SNOVA) % l_SNOVA);
+	}
+	convert_GF16s_to_bytes_f(pt_signature, (gf16_t*) signature_in_GF16Matrix,
+	n_SNOVA * lsq_SNOVA);
+	for (int i = 0; i < bytes_salt; ++i) {
+		pt_signature[bytes_signature + i] = array_salt[i];
+	}
+
+	SNOVA_CLEAR(gf16m_secret_temp0);
+	return 1;
+
+}
+
+// Modified signing algorithm with fault injection and statistics collection
+bool sign_with_fault_injection(uint8_t *pt_signature, const uint8_t *digest,
+		uint64_t bytes_digest, uint8_t *array_salt, Aalpha_t Aalpha,
+		Balpha_t Balpha, Qalpha1_t Qalpha1, Qalpha2_t Qalpha2, T12_t T12,
+		F11_t F11, F12_t F12, F21_t F21,
+		const uint8_t pt_public_key_seed[seed_length_public],
+		const uint8_t pt_private_key_seed[seed_length_private], uint8_t *V) {
+
+
+	gf16_t hash_in_GF16[m_SNOVA * lsq_SNOVA];
+
+	uint8_t signed_hash[bytes_hash];
+
+
+	bool signature_success = false;
+	createSignedHash_f(digest, bytes_digest, pt_public_key_seed, array_salt,
+			signed_hash);
+	convert_bytes_to_GF16s_f(signed_hash, hash_in_GF16, GF16s_hash);
+
+
+
+	do {
+
+		signature_success = false;
+
+
+
+		// Proceed with signature generation (assumes a function `generate_signature`)
+		signature_success = generate_signature(pt_signature, digest,
+				bytes_digest, array_salt, Aalpha, Balpha, Qalpha1, Qalpha2, T12,
+				F11, F12, F21, pt_public_key_seed, pt_private_key_seed, V);
+		if (!signature_success) {
+			step_2_failures++;
+			return false;
+		}
+	} while (!signature_success);
+
+	return signature_success;
+}
+
 #endif
+#endif /* SNOVA_KERNEL_FAULT_H_ */

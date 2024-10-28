@@ -10,16 +10,14 @@ ARM_FEATURE_AES := $(findstring ARM_FEATURE_AES, $(shell gcc -march=$(ARCH) -dM 
 CC = gcc
 AR = ar
 
-ifeq ($(ARM_FEATURE_AES), ARM_FEATURE_AES)
-CFLAGS = -Wall -Wextra -Wpedantic -Wredundant-decls -Wshadow -Wvla -Wpointer-arith -ftree-vectorize -O3 -march=armv8-a+crypto -mtune=$(ARCH)
-else
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wredundant-decls -Wshadow -Wvla -Wpointer-arith -ftree-vectorize -O3 -march=$(ARCH) -mtune=$(ARCH) -lm
-endif
+
+CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wredundant-decls -Wshadow -Wvla -Wpointer-arith -ftree-vectorize -O0 -g3 -march=$(ARCH) -mtune=$(ARCH) -lm
 
 BUILD_OUT_PATH = build/
 BUILD_LIBO_OUT_PATH = build_libo
 
-OLIST = $(BUILD_OUT_PATH)rng.o $(BUILD_OUT_PATH)snova.o $(BUILD_OUT_PATH)ct_functions.o  $(BUILD_OUT_PATH)snova_utils.o
+OLIST = $(BUILD_OUT_PATH)rng.o $(BUILD_OUT_PATH)snova.o $(BUILD_OUT_PATH)ct_functions.o 
+OLIST_ATTACK = $(BUILD_OUT_PATH)rng.o $(BUILD_OUT_PATH)ct_functions.o 
 SNOVA_API_OLIST = $(BUILD_OUT_PATH)snova.o $(BUILD_OUT_PATH)ct_functions.o
 
 SYMMETRICLIB = shake/KeccakHash.c shake/SimpleFIPS202.c shake/KeccakP-1600-opt64.c shake/KeccakSponge.c
@@ -154,8 +152,8 @@ test: init info $(OLIST) $(STATICLIB)
 	$(CC) $(CFLAGS) $(SNOVA_PARAMS) $(OLIST) test/test.c -o test.a $(LIBS)
 	./test.a > test_$(CRYPTO_ALGNAME).log
 
-attack: init info $(OLIST) $(STATICLIB)
-	$(CC) $(CFLAGS) $(SNOVA_PARAMS) $(OLIST) attack_alg_6.c -o attack.a $(LIBS)
+attack: init info $(OLIST_ATTACK) $(STATICLIB)
+	$(CC) $(CFLAGS) $(SNOVA_PARAMS) $(OLIST_ATTACK) attack_alg_6.c -o attack.a $(LIBS)
 
 test_api: init info $(OLIST) build/sign.o $(STATICLIB)
 	$(CC) $(CFLAGS) $(SNOVA_PARAMS) $(OLIST) test/test_api.c build/sign.o -o test_api.a $(LIBS)
