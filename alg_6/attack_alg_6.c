@@ -87,12 +87,12 @@ void sign_digest_esk(uint8_t *pt_signature, const uint8_t *digest,
 				sk_upk.F12, sk_upk.F21, sk_upk.pt_public_key_seed,
 				sk_upk.pt_private_key_seed, V);
 
-		if (!success) {
+		if (success) {
 			compute_stats(V, c_beta);
-			printf("Gamma_epsilon_1_sup = %d\n", Gamma_epsilon_1_sup);
+			/*printf("Gamma_epsilon_1_sup = %d\n", Gamma_epsilon_1_sup);
 			printf("Gamma_epsilon_1_inf = %d\n", Gamma_epsilon_1_inf);
 			printf("Gamma_epsilon_2_sup = %d\n", Gamma_epsilon_2_sup);
-			printf("Gamma_epsilon_2_inf = %d\n", Gamma_epsilon_2_inf);
+			printf("Gamma_epsilon_2_inf = %d\n", Gamma_epsilon_2_inf);*/
 
 			for (int beta = 0; beta < l_SNOVA; beta++) {
 				for (uint8_t x = 0; x < Q; x++) {
