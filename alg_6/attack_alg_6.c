@@ -26,6 +26,15 @@ uint8_t random_F_q_excluding(uint8_t fixed_value) {
 	return random_value;
 }
 
+// Function to generate a random field element in F_q, excluding fixed_value
+float random_between_ep_and_1(float epsilon) {
+	float random_value;
+	do {
+		random_value = (float) rand() / RAND_MAX;
+	} while (random_value <epsilon);
+	return random_value;
+}
+
 // Parameters for fault probability and the signing matrix
 float epsilon = 0.95; // Lower bound for P_ijk
 float P[v_SNOVA][l_SNOVA][l_SNOVA]; // Probability matrix
@@ -40,11 +49,19 @@ int Gamma_epsilon_1_sup, Gamma_epsilon_1_inf;
 int Gamma_epsilon_2_sup, Gamma_epsilon_2_inf;
 
 // Initialize P matrix with epsilon value
-void initialize_P_matrix(float epsilon) {
+void initialize_P_matrix(float epsilon, int inf, int sup) {
 	for (int i = 0; i < v_SNOVA; ++i) {
 		for (int j = 0; j < l_SNOVA; ++j) {
 			for (int k = 0; k < l_SNOVA; ++k) {
-				P[i][j][k] = epsilon;
+				P[i][j][k] = (float)1/Q;
+			}
+		}
+	}
+    
+    for (int i = 0; i < v_SNOVA; ++i) {
+		for (int j = 0; j < l_SNOVA; ++j) {
+			for (int k = inf; k < sup; ++k) {
+				P[i][j][k] = random_between_ep_and_1(epsilon);
 			}
 		}
 	}
@@ -126,7 +143,7 @@ bool generate_signature(uint8_t *pt_signature, const uint8_t *digest,
 	Left_X = Left_X_tmp;
 	Right_X = Right_X_tmp;
 	int flag_redo = 1;
-	uint8_t num_sign = 0;
+	
 	int counter;
 
 	// printf("hash value in GF16: \n");
@@ -134,7 +151,7 @@ bool generate_signature(uint8_t *pt_signature, const uint8_t *digest,
 	// printf("===================\n");
 	//--------------------------------------
 	do {
-		num_sign++;
+		
 		flag_redo = 0;
 		// put hash value in the last column of Gauss matrix
 		for (int index = 0; index < (m_SNOVA * lsq_SNOVA); index++) {
@@ -276,12 +293,12 @@ bool generate_signature(uint8_t *pt_signature, const uint8_t *digest,
 
 		attemps++;
 
-	} while (flag_redo && attemps <= 10);
-	if (attemps > 10) {
+	} while (attemps <= 0);
+	if (flag_redo) {
 		return 0;
 	}
 
-	// printf("times of Gauss elimination : %d\n", num_sign);
+	
 
 	for (int index = 0; index < o_SNOVA; ++index) {
 		for (int i = 0; i < rank; ++i) {
@@ -373,7 +390,7 @@ bool sign_with_fault_injection(uint8_t *pt_signature, const uint8_t *digest,
 	Left_X = Left_X_tmp;
 	Right_X = Right_X_tmp;
 	int flag_redo = 1;
-	uint8_t num_sign = 0;
+	
 	int counter;
 
 	bool signature_success = false;
@@ -384,7 +401,7 @@ bool sign_with_fault_injection(uint8_t *pt_signature, const uint8_t *digest,
 	uint8_t V[(v_SNOVA * lsq_SNOVA + 1) >> 1];
 
 	do {
-		num_sign++;
+		
 		signature_success = false;
 
 		inject_faults(V); // Generate values for V with fault injection
@@ -496,7 +513,7 @@ void compute_results() {
 int main() {
 	snova_init();
 	int lv = v_SNOVA * l_SNOVA;
-	initialize_P_matrix(epsilon);
+	initialize_P_matrix(epsilon, 0, l);
 	calculate_Gamma_thresholds(lv, epsilon); // Calculate thresholds for success conditions
 	run_experiments();
 	compute_results();
