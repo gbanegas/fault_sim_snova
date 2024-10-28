@@ -403,21 +403,12 @@ bool sign_with_fault_injection(uint8_t *pt_signature, const uint8_t *digest,
 
 	uint8_t V[(v_SNOVA * lsq_SNOVA + 1) >> 1];
 
-	do {
-		
-		signature_success = false;
-
-		inject_faults(V); // Generate values for V with fault injection
+	inject_faults(V); // Generate values for V with fault injection
 
 		// Proceed with signature generation (assumes a function `generate_signature`)
-		signature_success = generate_signature(pt_signature, digest,
+    signature_success = generate_signature(pt_signature, digest,
 				bytes_digest, array_salt, Aalpha, Balpha, Qalpha1, Qalpha2, T12,
 				F11, F12, F21, pt_public_key_seed, pt_private_key_seed, V);
-		if (!signature_success) {
-			step_2_failures++;
-			return false;
-		}
-	} while (!signature_success);
 
 	return signature_success;
 }
@@ -464,6 +455,10 @@ void run_experiments() {
 
 	sk_gf16 sk_upk;
 	sk_unpack(&sk_upk, sk);
+    
+    step_2_failures=0;
+    successes_r1=0;
+    successes_r2=0;
 
 	// Clear Secret!
 	SNOVA_CLEAR_BYTE(&sk_upk, sizeof(sk_upk));
@@ -475,7 +470,8 @@ void run_experiments() {
 				sk_upk.pt_private_key_seed);
 
 		if (!result)
-			continue; // If Step 2 fails, skip further steps
+			step_2_failures++;
+            continue; // If Step 2 fails, skip further steps
 
 		compute_stats(V, c_beta);
 
