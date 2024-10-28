@@ -26,7 +26,7 @@ uint8_t random_F_q_excluding(uint8_t fixed_value) {
 	return random_value;
 }
 
-// Function to generate a random field element in F_q, excluding fixed_value
+// Function to generate a probability betwen epsilon and 1.
 float random_between_ep_and_1(float epsilon) {
 	float random_value;
 	do {
@@ -50,18 +50,19 @@ int Gamma_epsilon_2_sup, Gamma_epsilon_2_inf;
 
 // Initialize P matrix with epsilon value
 void initialize_P_matrix(float epsilon, int inf, int sup) {
-	for (int i = 0; i < v_SNOVA; ++i) {
+	// By default, each entry can be chosen uniformly randomly. 
+    for (int i = 0; i < v_SNOVA; ++i) {
 		for (int j = 0; j < l_SNOVA; ++j) {
 			for (int k = 0; k < l_SNOVA; ++k) {
 				P[i][j][k] = (float)1/Q;
 			}
 		}
 	}
-    
+    // Only columns indexed by inf to sup-1 of V will be affected by a fault. 
     for (int i = 0; i < v_SNOVA; ++i) {
 		for (int j = 0; j < l_SNOVA; ++j) {
 			for (int k = inf; k < sup; ++k) {
-				P[i][j][k] = random_between_ep_and_1(epsilon);
+				P[i][j][k] = random_between_ep_and_1(epsilon); // Vijk holds a fixed value with probability P[i][j][k]
 			}
 		}
 	}
@@ -292,10 +293,12 @@ bool generate_signature(uint8_t *pt_signature, const uint8_t *digest,
 		}
 
 		attemps++;
-
+    //only one iteration
 	} while (attemps <= 0);
 	if (flag_redo) {
-		return 0;
+		// it means the Gauss elimnation has failed.
+        return 0;
+        
 	}
 
 	
@@ -513,7 +516,8 @@ void compute_results() {
 int main() {
 	snova_init();
 	int lv = v_SNOVA * l_SNOVA;
-	initialize_P_matrix(epsilon, 0, l);
+    int l=l_SNOVA;
+    initialize_P_matrix(epsilon, 0, l);
 	calculate_Gamma_thresholds(lv, epsilon); // Calculate thresholds for success conditions
 	run_experiments();
 	compute_results();
