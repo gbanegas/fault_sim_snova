@@ -61,7 +61,7 @@ float random_between_ep_and_1() {
 
 // Fault injection with Bernoulli distribution
 void inject_faults(uint8_t *V, uint8_t *vinegar_in_byte) {
-	uint8_t fixed_value = random_F_q_excluding(0); // Fixed fault value in F_q
+	uint8_t fixed_value = rand() % 16;; // Fixed fault value in F_q
 	int counter = 0;
 
 	for (int i = 0; i < v_SNOVA; i++) {
@@ -77,8 +77,8 @@ void inject_faults(uint8_t *V, uint8_t *vinegar_in_byte) {
 					lower_element = fixed_value;
 				} else {
 					// No fault: use random values for both nibbles
-					upper_element = random_F_q_excluding(0);
-					lower_element = random_F_q_excluding(0);
+					upper_element = random_F_q_excluding(fixed_value);
+					lower_element = random_F_q_excluding(fixed_value);
 				}
 
 				// Set the byte in V using the upper and lower nibbles
